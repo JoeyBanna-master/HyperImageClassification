@@ -1,0 +1,13 @@
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.7.2
+
+#torch==2.5.1
+
+einops==0.8.2
+torch-dct==0.1.6
+
+fvcore==0.1.5.post20221221
+psutil
+matplotlib
+tifffile
