@@ -8,7 +8,7 @@ patch_size_IP = 11
 percent_KSC = 5
 patch_size_KSC = 11
 
-percent_HUST2013 = 10
+percent_HUST2013 = 3
 patch_size_HUST2013 = 11
 
 percent_Loukia = 0.5

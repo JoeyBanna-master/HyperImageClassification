@@ -59,20 +59,23 @@ def test_mcmd(args, mapping_tar, encoder, train_loader, test_loader):
 
     return test_OA, test_AA, test_kappa, report, acc_for_each_class
 
-def test(args, iter, test_loader, model):
+def test(args, iter, test_loader, model, return_diagnostics=False):
     model.eval()
     # 创建一个predictions来记录我们预测的结果
-    predictions = torch.FloatTensor().to(args.device)
+    predictions = []
     # labels是原本的标签
-    labels = torch.FloatTensor().to(args.device)
+    labels = []
+    num_classes = getattr(args, 'classes', None)
     if args.device.type == 'cuda':
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(args.device)
     T1 = time.perf_counter()  # 测试开始的时间
     with torch.no_grad():  # 是一个上下文管理器，被该语句 wrap 起来的部分将不会track梯度。
         for (patches, targets) in test_loader:
-            patches = patches.to(args.device)
-            targets = targets.to(args.device)
+            patches = patches.to(args.device, non_blocking=True)
+            targets = targets.to(args.device, non_blocking=True)
             output = model(patches)
+            if num_classes is None:
+                num_classes = output.shape[1]
             batch_prediction = output.argmax(1)
             # output,_,_,= model(patches) #DBMGNet专用
             # output, abu, hsi_re = model(patches)  # MSUANet
@@ -81,10 +84,14 @@ def test(args, iter, test_loader, model):
             # batch_prediction = logits.argmax(1) # LRDTN专用
 
 
-            predictions = torch.cat((predictions, batch_prediction), 0)
-            labels = torch.cat((labels, targets), 0)
+            predictions.append(batch_prediction)
+            labels.append(targets)
+    if not predictions:
+        raise ValueError('Test loader produced no batches; check batch_size/drop_last.')
+    predictions = torch.cat(predictions)
+    labels = torch.cat(labels)
     if args.device.type == 'cuda':
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(args.device)
     T2 = time.perf_counter()  # 测试结束的时间
     print('程序推理时间:%s秒' % ((T2 - T1)))
     tim = (T2 - T1)
@@ -108,7 +115,20 @@ def test(args, iter, test_loader, model):
     print("整体测试集上的kappa系数:{}".format(test_kappa))
     print("test_OA={}".format(round(test_OA, 4)))
 
-    return test_OA, test_AA, test_kappa, report, acc_for_each_class, tim
+    class_labels = np.arange(num_classes)
+    confusion = metrics.confusion_matrix(labels, predictions, labels=class_labels)
+    diagnostics = {
+        'class_labels': class_labels.tolist(),
+        'confusion_matrix': confusion.tolist(),
+        'class_support': confusion.sum(axis=1).tolist(),
+        'prediction_counts': confusion.sum(axis=0).tolist(),
+    }
+    print('Test confusion matrix (rows=true, columns=predicted; zero-based class indices):')
+    print(confusion)
+    print('Test true class counts:', diagnostics['class_support'])
+    print('Test predicted class counts:', diagnostics['prediction_counts'])
+    result = (test_OA, test_AA, test_kappa, report, acc_for_each_class, tim)
+    return result + (diagnostics,) if return_diagnostics else result
 
 
 # import time

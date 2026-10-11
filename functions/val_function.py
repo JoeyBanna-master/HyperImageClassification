@@ -1,45 +1,19 @@
-'''
-在val验证当前model的函数
-输入：model,valloader,
-返回：OA
-'''
+"""Validation OA in percent, rounded exactly as the experiment entry expects."""
 import torch
-from sklearn import metrics
+from .classification_metrics import ClassificationMetrics
 
 
-def validate(model, loader):
-
-    #将模型设置为评估模式
+def validate(model, loader, criterion=None, num_classes=None, return_metrics=False):
+    """Keep the default percent OA API; optionally return loss/accuracy/matrix."""
     model.eval()
-    # 创建一个predictions来记录我们预测的结果
-    predictions = torch.FloatTensor().cuda() #跑服务器
-    # labels是原本的标签
-    labels = torch.FloatTensor().cuda()#跑服务器
-
-
-    # 测试部分主体
+    device = next(model.parameters()).device
+    statistics = ClassificationMetrics(num_classes)
     with torch.no_grad():
-        for (X, y) in loader:
-
-            X, y = X.cuda(), y.cuda()#跑服务器
-            # outs,_,_ = model(X) #DBMGNet专用
-            outs = model(X)
-            # 计算准确率等参数
-            batch_prediction = outs.argmax(1).cuda()
-
-            # loss = self.criterion(outs, y)
-
-            # _, _, logits = model(X, X)  # LRDTN专用
-            # batch_prediction = logits.argmax(1)  # LRDTN专用
-
-
-            predictions = torch.cat((predictions, batch_prediction), 0)
-            labels = torch.cat((labels, y), 0)
-
-
-    # metrics最后要转换成numpy，但是从cuda是没法直接转成numpy的，所以要转到CPU上面
-    predictions = predictions.cpu()
-    labels = labels.cpu()
-    OA = metrics.accuracy_score(labels, predictions) * 100
-    OA = round(OA, 2)  # 用于数字的四舍五入
-    return OA
+        for inputs, targets in loader:
+            inputs = inputs.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets) if criterion is not None else None
+            statistics.update(outputs, targets, loss)
+    result = statistics.result()
+    return result if return_metrics else round(result['accuracy'] * 100, 2)

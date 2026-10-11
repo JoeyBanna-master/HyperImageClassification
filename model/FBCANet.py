@@ -1044,6 +1044,20 @@ class DctSpatialInteraction(nn.Module):#the raw
 #         x_recon = self.FFC(x)
 #         return identity + self.alpha * x_recon
 #
+def _high_frequency(module, x, ratio):
+    """Cache only the constant mask, never features or autograd graphs."""
+    h, w = x.shape[-2:]
+    key = (h, w, tuple(ratio), x.device, x.dtype)
+    if getattr(module, '_frequency_mask_key', None) != key:
+        mask = x.new_ones((1, 1, h, w))
+        mask[..., :int(h * ratio[0]), :int(w * ratio[1])] = 0
+        # Non-persistent buffer keeps legacy state_dict keys compatible.
+        module.register_buffer('_frequency_mask', mask, persistent=False)
+        module._frequency_mask_key = key
+    coefficients = DCT.dct_2d(x, norm='ortho')
+    return DCT.idct_2d(coefficients * module._frequency_mask, norm='ortho')
+
+
 class DSI(nn.Module):#95.91 95.64 95.58
     def __init__(self,
                  in_channels,
@@ -1091,18 +1105,13 @@ class DSI(nn.Module):#95.91 95.64 95.58
         weight[:h0, :w0] = 0
         return weight
 
-    def forward(self, x):
+    def forward(self, x, high_frequency=None):
         _, _, h0, w0 = x.size()
 
         if not self.isdct:
             return x * self.spatial1x1(x)
 
-        # 1. DCT 提取高频
-        idct = DCT.dct_2d(x, norm='ortho')
-        weight = self._compute_weight(h0, w0, self.ratio).to(x.device)
-        weight = weight.view(1, h0, w0).expand_as(idct)
-        dct = idct * weight
-        dct_ = DCT.idct_2d(dct, norm='ortho')  # [B, C, H, W] 高频残差
+        dct_ = high_frequency if high_frequency is not None else _high_frequency(self, x, self.ratio)
 
         # 2. 归一化
         high_freq = self.dct_norm(dct_)
@@ -1234,7 +1243,7 @@ class DCI(nn.Module):#the raw
         weight[:h0, :w0] = 0# 将低频区域权重设为0
         return weight
     # 前向传播方法
-    def forward(self, x): # x是输入特征图
+    def forward(self, x, high_frequency=None): # x是输入特征图
         # 获取输入特征图的形状：batch_size, channels, height, width
         n, c, h, w = x.size()
 
@@ -1250,16 +1259,7 @@ class DCI(nn.Module):#the raw
 
             # 生成通道注意力权重并与输入相乘
             return x * torch.sigmoid(self.channel2x1(channel))
-        # 如果使用DCT，先对输入进行二维DCT变换
-        idct = DCT.dct_2d(x, norm='ortho')
-        # 计算权重矩阵并移动到与输入相同的设备
-        weight = self._compute_weight(h, w, self.ratio).to(x.device)
-        # 调整权重形状并扩展到与DCT结果相同的形状
-        weight = weight.view(1, h, w).expand_as(idct)
-        # 过滤低频特征，保留高频特征
-        dct = idct * weight # 过滤掉低频特征
-        # 对处理后的DCT结果进行逆DCT变换
-        dct_ = DCT.idct_2d(dct, norm='ortho')
+        dct_ = high_frequency if high_frequency is not None else _high_frequency(self, x, self.ratio)
         # 对逆DCT结果进行自适应最大池化和平均池化，输出大小为patch大小
         amaxp = F.adaptive_max_pool2d(dct_, output_size=(self.h, self.w))
         aavgp = F.adaptive_avg_pool2d(dct_, output_size=(self.h, self.w))
@@ -1292,9 +1292,13 @@ class DFIM(nn.Module): #the raw
         )
     def forward(self, x): # x是输入特征图
         # 通过空间交互模块得到空间注意力加权后的特征
-        spatial = self.spatial(x)
+        shared = None
+        if (self.spatial.isdct and self.channel.isdct
+                and self.spatial.ratio == self.channel.ratio):
+            shared = _high_frequency(self, x, self.spatial.ratio)
+        spatial = self.spatial(x, high_frequency=shared)
         # 通过通道交互模块得到通道注意力加权后的特征
-        channel = self.channel(x)
+        channel = self.channel(x, high_frequency=shared)
         # 将空间和通道注意力的结果相加，再通过输出处理模块
         return self.out(spatial + channel)
 

@@ -1,0 +1,8 @@
+ 
+ PU
+ python main.py --exp_name CPF_pu --gpus 0,1,2 --datasets PU --classes 9
+
+
+
+
+ 
