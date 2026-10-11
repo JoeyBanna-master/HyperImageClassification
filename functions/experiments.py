@@ -16,7 +16,7 @@ from model.s2mamba import S2Mamba
 # from model.s2mamba_GDN import S2Mamba_GDN
 # from model.demunet.model import MyModel
 # from model.FBCANet import FBCANet
-# from model.cpformer import CPFormer
+# from model.cpformer1 import CPFormer
 
 # SSFTM 的导入配置保留供手动切换；使用 TCPI 时无需加载其 CUDA 扩展。
 # import importlib.util
