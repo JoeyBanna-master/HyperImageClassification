@@ -12,17 +12,26 @@ from einops import rearrange
 logger = logging.getLogger(__name__)
 
 
+from pathlib import Path
 from torch.utils.cpp_extension import load
-wkv_cuda = load(name="bi_wkv", sources=["/home/rdg22/Code/MambaHSI/model/model/cuda_new/bi_wkv.cpp", "/home/rdg22/Code/MambaHSI/model/model/cuda_new/bi_wkv_kernel.cu"],
-                verbose=True, extra_cuda_cflags=[
-                                    "--use_fast_math",
-                                    "-O3",
-                                    "-Xptxas=-O3",
-                                    "-DTmax=262144",
-                                    "-allow-unsupported-compiler"
-                                ]
-                )
 
+_cuda_dir = Path(__file__).resolve().parent / "cuda_new"
+
+wkv_cuda = load(
+    name="bi_wkv",
+    sources=[
+        str(_cuda_dir / "bi_wkv.cpp"),
+        str(_cuda_dir / "bi_wkv_kernel.cu"),
+    ],
+    verbose=True,
+    extra_cuda_cflags=[
+        "--use_fast_math",
+        "-O3",
+        "-Xptxas=-O3",
+        "-DTmax=262144",
+        "-allow-unsupported-compiler",
+    ],
+)
 
 class WKV(torch.autograd.Function):
     @staticmethod
@@ -92,7 +101,8 @@ def spatial_grad_mag_sobel(x_bchw: torch.Tensor) -> torch.Tensor:
                        [ 1, 2, 1]], dtype=x_bchw.dtype, device=x_bchw.device).view(1,1,3,3)
 
 
-    x_flat = x_bchw.view(B*C, 1, H, W)
+    # x_flat = x_bchw.view(B*C, 1, H, W)
+    x_flat = x_bchw.reshape(B * C, 1, H, W)
     gx = F.conv2d(x_flat, kx, padding=1)  # [B*C,1,H,W]
     gy = F.conv2d(x_flat, ky, padding=1)
     # import ipdb; ipdb.set_trace()

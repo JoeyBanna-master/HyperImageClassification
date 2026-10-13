@@ -117,17 +117,17 @@ def get_model(args):
     #                num_classes=args.classes, dim=64, reduction=16,
     #                patch_size=args.windows).to(args.device)
     #demunet 网络代码
-    #model = MyModel(batch_size=args.batch_size, bilinear=True).to(args.device)
-#S2Mamba 网络代码
-    model = S2Mamba(
-    in_chans=CONFIG_HSIC[args.datasets]['bands'],
-    patch=args.windows,
-    num_classes=args.classes,
-    depths=[1],
-    dims=[64],
-    drop_path_rate=0.1,
-    attn_drop_rate=0.1,
-).to(args.device)
+    # model = MyModel(batch_size=args.batch_size, bilinear=True).to(args.device)
+# #S2Mamba 网络代码
+#     model = S2Mamba(
+#     in_chans=CONFIG_HSIC[args.datasets]['bands'],
+#     patch=args.windows,
+#     num_classes=args.classes,
+#     depths=[1],
+#     dims=[64],
+#     drop_path_rate=0.1,
+#     attn_drop_rate=0.1,
+# ).to(args.device)
 
 # s2mamba_GDN：保留 PCS/SMG，将 BSS 改为共享参数的双向 GatedDeltaNet。
     # model = S2Mamba_GDN(
@@ -165,6 +165,34 @@ def get_model(args):
     #     scan_strategy="both_spacausal_spenoncausal",
     # ).to(args.device)
 
+    # HiRWkv 网络代码
+    import importlib
+    import torch.nn as nn
+
+    if args.device.type != "cuda":
+        raise RuntimeError("当前 HiRWKV 实现依赖 CUDA，不能在 CPU 上运行")
+
+    # 文件夹名字包含连字符，用 importlib 导入。
+    # 放在函数内，避免主进程一开始就加载 CUDA 扩展。
+    module = importlib.import_module(
+        "model.Hi-RWKV-main.model.HiRWKV_model"
+    )
+    HiRWKV = module.HiRWKV
+
+    backbone = HiRWKV(
+        in_channels=CONFIG_HSIC[args.datasets]["bands"],
+        hidden_dim=128,
+        num_classes=args.classes,
+        group_num=1,
+        dataset_name=args.datasets,
+    )
+
+    # 原输出是分类分数图，平均池化后适配你的 patch 分类流程。
+    model = nn.Sequential(
+        backbone,
+        nn.AdaptiveAvgPool2d(1),
+        nn.Flatten(1),
+    ).to(args.device)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate,
                                 momentum=args.momentum, dampening=args.weight_decay)

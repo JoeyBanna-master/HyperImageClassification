@@ -9,7 +9,8 @@ from torch.nn import TransformerEncoderLayer
 from torch.nn import TransformerEncoder
 import math
 from .mamba import Mamba, MambaConfig
-ic=144
+#根据数据集波段数量修改  huston2013 144 pu103
+ic=103
 oc=256
 ws=11
 fs=(ws+1)//2
@@ -18,7 +19,7 @@ png_in=fs*fs
 tc=oc
 L1O=128
 
-num_class=15
+num_class=9
 
 d_model=ws*ws
 
@@ -203,10 +204,13 @@ class MyModel(torch.nn.Module):
 
         x1=x.permute(0, 1, 3, 2)
         x1=self.mamba2(x1) 
+        print(x1.shape)
         x1=x1.permute(0, 1, 3, 2)
         x=self.mamba(x)
+        print(x.shape)
         x=(1-self.lmd)*x+self.lmd*x1
-        
+        print(x.shape)
+
         x=self.BN(x)
         x1=self.conv1(self.relu(self.bn1(x)))
         x1 = self.conv2(self.relu(self.bn2(x1)))
