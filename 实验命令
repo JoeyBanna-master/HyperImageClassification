@@ -5,4 +5,14 @@
 
 
 
- 
+  python main.py --exp_name Hi-RWKV_pu --gpus 0,1,2 --datasets PU --classes 9
+
+
+
+git 仓库
+
+git clone https://github.com/chenning0115/SQSFormer.git model/SQSFormer
+
+git clone https://github.com/zhaolin6/HybridFormer.git model/HybridFormer
+
+git clone https://github.com/mhaut/morphFormer.git model/morphFormer
