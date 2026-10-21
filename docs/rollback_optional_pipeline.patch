@@ -1,0 +1,115 @@
+--- a/functions/experiments.py
++++ b/functions/experiments.py
+@@ -65,10 +65,8 @@
+         expected = (config['bands'], args.windows, args.windows)
+         if tuple(data.datas.shape[1:]) != expected:
+             raise ValueError(f'{split} shape {tuple(data.datas.shape)}; expected [N, {expected}]')
+-        if data.labels.ndim != 1 or len(data) == 0:
+-            raise ValueError(f'{split} requires nonempty 1D labels')
+-        if split == 'train' and len(data) < args.batch_size:
+-            raise ValueError('train requires at least batch_size samples (drop_last=True)')
++        if data.labels.ndim != 1 or len(data) < args.batch_size:
++            raise ValueError(f'{split} requires 1D labels and at least batch_size samples (drop_last=True)')
+         if data.labels.min() < 0 or data.labels.max() >= args.classes:
+             raise ValueError(f'{split} labels must be in [0, {args.classes - 1}]')
+         result.append(data)
+@@ -78,8 +76,7 @@
+ def make_loaders(args, datasets, seed):
+     loaders = []
+     for offset, dataset in enumerate(datasets):
+-        is_training = offset == 0
+-        options = dict(batch_size=args.batch_size, shuffle=is_training, drop_last=is_training,
++        options = dict(batch_size=args.batch_size, shuffle=True, drop_last=True,
+                        num_workers=args.num_workers,
+                        pin_memory=args.device.type == 'cuda' and not args.no_pin_memory,
+                        generator=torch.Generator().manual_seed(seed + offset),
+@@ -94,7 +91,7 @@
+ def get_model(args):
+     model = build_model(args)
+     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate,
+-                                momentum=args.momentum, weight_decay=args.weight_decay)
++                                momentum=args.momentum, dampening=args.weight_decay)
+     scheduler = torch.optim.lr_scheduler.LambdaLR(
+         optimizer, lambda epoch: 1 - epoch / args.epochs)
+     return model, optimizer, scheduler
+@@ -147,8 +144,6 @@
+                                   data_initialization_seconds=initialization_seconds,
+                                   epoch_times=args.epoch_times,
+                                   training_history=args.training_history,
+-                                  best_epoch=args.best_epoch,
+-                                  best_val_accuracy=args.best_val_accuracy,
+                                   accuracy_unit='fraction',
+                                   confusion_matrix_axes={'rows': 'true', 'columns': 'predicted'},
+                                   confusion_matrix_labels=diagnostics['class_labels'],
+@@ -218,8 +213,7 @@
+         if not np.isfinite([result['oa'], result['aa'], result['kappa']]).all():
+             raise ValueError(f'Experiment {index} has non-finite metrics')
+         results.append(result)
+-    # Choose the representative checkpoint using validation, never test OA.
+-    best = max(results, key=lambda result: result['best_val_accuracy'])
++    best = max(results, key=lambda result: result['oa'])  # first wins ties, as before
+     scores = np.array([[r['oa'], r['aa'], r['kappa']] for r in results])
+     classes = np.array([r['class_accuracy'] for r in results])
+     # A sample standard deviation needs >=2 repeats; use null for a smoke run.
+@@ -229,8 +223,7 @@
+     shutil.copyfile(best_path, run_dir / 'best_model.pth')
+     legacy_path = Path(args.output_dir) / args.datasets / f'{args.exp_name}_ab{{{args.ablation}}}{args.datasets}.pth'
+     shutil.copyfile(best_path, legacy_path)
+-    summary = dict(best_iteration=best['iteration'], selection_metric='best_val_accuracy',
+-                   metrics_order=['OA', 'AA', 'Kappa'],
++    summary = dict(best_iteration=best['iteration'], metrics_order=['OA', 'AA', 'Kappa'],
+                    mean=scores.mean(axis=0).tolist(), sample_std=score_std,
+                    class_mean=classes.mean(axis=0).tolist(), class_sample_std=class_std,
+                    mean_test_seconds=float(np.mean([r['test_seconds'] for r in results])),
+--- a/functions/train_function_new.py
++++ b/functions/train_function_new.py
+@@ -61,9 +61,8 @@
+ def train(args, iter, model, train_loader, val_loader, criterion, optimizer, scheduler, epoch_num,
+           history_path=None):
+     start = time.time()
+-    best_val_accuracy = -1.0
+-    best_state = None
+-    best_epoch = None
++    best_val_OA = 0.0   #测试集最好的总体分类精度
++    best_model = None   #记录性能最好的模型的权重
+ 
+     epoch_times = []
+     training_history = []
+@@ -86,7 +85,7 @@
+         train_end = time.perf_counter()
+         val_metrics = validate(model, val_loader, criterion=criterion, num_classes=args.classes,
+                                return_metrics=True)
+-        val_OA = round(val_metrics['accuracy'] * 100, 2)  # 仅展示时四舍五入
++        val_OA = round(val_metrics['accuracy'] * 100, 2)  #保留原验证选择逻辑
+         epoch_times.append({'epoch': epoch + 1, 'train_seconds': train_end - epoch_start,
+                             'validation_seconds': time.perf_counter() - train_end})
+         record = {
+@@ -108,23 +107,15 @@
+             with history_path.open('a', encoding='utf-8') as stream:
+                 stream.write(json.dumps(detailed_record, ensure_ascii=False) + '\n')
+         # Save Best Model Weights  保存最佳模型权重参数
+-        if val_metrics['accuracy'] > best_val_accuracy:
+-            best_val_accuracy = val_metrics['accuracy']
+-            best_epoch = epoch + 1
+-            # A tensor snapshot must not alias the model being updated next epoch.
+-            best_state = {name: value.detach().cpu().clone()
+-                          for name, value in model.state_dict().items()}
++        if best_val_OA <= val_OA:
++            best_val_OA = val_OA
++            best_model = model
+             print('Best val_OA by now,update the best model')
+ 
+-    if best_state is None:
+-        raise RuntimeError('Training did not produce a valid validation checkpoint')
+-    model.load_state_dict(best_state)
+-    args.best_epoch = best_epoch
+-    args.best_val_accuracy = best_val_accuracy
+-    print('*****Iter:{}....This iteration has ended, best_val_OA:{}, return the best model*****'.format(iter, best_val_accuracy * 100))
++    print('*****Iter:{}....This iteration has ended, best_val_OA:{}, , return the best model*****'.format(iter, best_val_OA))
+     # Record Time
+     time_record(start)
+     #这里只需要返回我们训练的最好权重即可
+     args.epoch_times = epoch_times
+     args.training_history = training_history
+-    return model
++    return best_model

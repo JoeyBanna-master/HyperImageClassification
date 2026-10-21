@@ -26,7 +26,7 @@ patch_size_SV = 11
 percent_PC = 0.5
 patch_size_PC = 13
 
-percent_LongKou = 10
+percent_LongKou = 0.1
 patch_size_LongKou = 11
 
 percent_HanChuan = 0.1
@@ -35,7 +35,7 @@ patch_size_HanChuan = 9
 percent_HongHu = 10
 patch_size_HongHu = 7
 
-percent_XU = 0.5
+percent_XU = 0.1
 patch_size_XU = 9
 
 

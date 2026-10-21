@@ -2,10 +2,67 @@
  PU
  python main.py --exp_name CPF_pu --gpus 0,1,2 --datasets PU --classes 9
 
+ python main.py --exp_name CPF_pu --model demunet --gpus 0,1,2 --datasets PU --classes 9
 
 
+
+
+  's2mamba': _build_s2mamba,
+    'demunet': _build_demunet,
+    'cpformer': _build_cpformer,
+    'ssftm': _build_ssftm,
+    'hirwkv': _build_hirwkv,
+    'hybridformer': _build_hybridformer,
+    'sqsformer': _build_sqsformer,
+    'morphformer': _build_morphformer,
 
   python main.py --exp_name Hi-RWKV_pu --gpus 0,1,2 --datasets PU --classes 9
+
+
+
+longkou
+python main.py --exp_name s2mamba --model demunet --gpus 0 --datasets LongKou --classes 9
+
+python main.py --exp_name cpformer --model cpformer --gpus 0 --datasets LongKou --classes 9
+
+
+python main.py --exp_name ssftm --model ssftm --gpus 0 --datasets LongKou --classes 9
+
+
+python main.py --exp_name hirwkv --model hirwkv --gpus 0 --datasets LongKou --classes 9
+
+python main.py --exp_name hybridformer --model hybridformer --gpus 0 --datasets LongKou --classes 9
+
+python main.py --exp_name sqsformer --model sqsformer --gpus 0 --datasets LongKou --classes 9
+python main.py --exp_name morphformer --model morphformer --gpus 0 --datasets LongKou --classes 9
+
+
+
+
+
+conda activate hsi_env
+python main.py --exp_name morphformer --model morphformer --gpus 0 --datasets XU --classes 9 --windows 9
+
+python main.py --exp_name cpformer --model cpformer --gpus 0 --datasets XU --classes 9    --windows 9
+
+python main.py --exp_name demunet --model demunet --gpus 0 --datasets XU --classes 9 --windows 9
+
+python main.py --exp_name s2mamba --model demunet --gpus 0 --datasets XU --classes 9 --windows 9
+
+python main.py --exp_name hybridformer --model hybridformer --gpus 0 --datasets XU --classes 9 --windows 9
+
+python main.py --exp_name sqsformer --model sqsformer --gpus 0 --datasets XU --classes 9 --windows 9
+
+
+
+conda activate ssftm_env
+
+python main.py --exp_name ssftm --model ssftm --gpus 0 --datasets XU  --classes 9 --windows 9
+
+conda activate hirwkv_env
+python main.py --exp_name hirwkv --model hirwkv --gpus 0 --datasets XU --classes 9 --windows 9
+
+
 
 
 

@@ -61,8 +61,9 @@ def train_epoch(args, train_loader, model, criterion, optimizer, epoch):
 def train(args, iter, model, train_loader, val_loader, criterion, optimizer, scheduler, epoch_num,
           history_path=None):
     start = time.time()
-    best_val_OA = 0.0   #测试集最好的总体分类精度
-    best_model = None   #记录性能最好的模型的权重
+    best_val_accuracy = -1.0
+    best_state = None
+    best_epoch = None
 
     epoch_times = []
     training_history = []
@@ -85,7 +86,7 @@ def train(args, iter, model, train_loader, val_loader, criterion, optimizer, sch
         train_end = time.perf_counter()
         val_metrics = validate(model, val_loader, criterion=criterion, num_classes=args.classes,
                                return_metrics=True)
-        val_OA = round(val_metrics['accuracy'] * 100, 2)  #保留原验证选择逻辑
+        val_OA = round(val_metrics['accuracy'] * 100, 2)  # 仅展示时四舍五入
         epoch_times.append({'epoch': epoch + 1, 'train_seconds': train_end - epoch_start,
                             'validation_seconds': time.perf_counter() - train_end})
         record = {
@@ -107,15 +108,23 @@ def train(args, iter, model, train_loader, val_loader, criterion, optimizer, sch
             with history_path.open('a', encoding='utf-8') as stream:
                 stream.write(json.dumps(detailed_record, ensure_ascii=False) + '\n')
         # Save Best Model Weights  保存最佳模型权重参数
-        if best_val_OA <= val_OA:
-            best_val_OA = val_OA
-            best_model = model
+        if val_metrics['accuracy'] > best_val_accuracy:
+            best_val_accuracy = val_metrics['accuracy']
+            best_epoch = epoch + 1
+            # A tensor snapshot must not alias the model being updated next epoch.
+            best_state = {name: value.detach().cpu().clone()
+                          for name, value in model.state_dict().items()}
             print('Best val_OA by now,update the best model')
 
-    print('*****Iter:{}....This iteration has ended, best_val_OA:{}, , return the best model*****'.format(iter, best_val_OA))
+    if best_state is None:
+        raise RuntimeError('Training did not produce a valid validation checkpoint')
+    model.load_state_dict(best_state)
+    args.best_epoch = best_epoch
+    args.best_val_accuracy = best_val_accuracy
+    print('*****Iter:{}....This iteration has ended, best_val_OA:{}, return the best model*****'.format(iter, best_val_accuracy * 100))
     # Record Time
     time_record(start)
     #这里只需要返回我们训练的最好权重即可
     args.epoch_times = epoch_times
     args.training_history = training_history
-    return best_model
+    return model

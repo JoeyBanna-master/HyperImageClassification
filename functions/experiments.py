@@ -9,33 +9,8 @@ import multiprocessing as mp
 from pathlib import Path
 import random
 import shutil
-import sys
 import time
 import traceback
-from model.s2mamba import S2Mamba
-# from model.s2mamba_GDN import S2Mamba_GDN
-# from model.demunet.model import MyModel
-# from model.FBCANet import FBCANet
-# from model.cpformer1 import CPFormer
-
-# SSFTM 的导入配置保留供手动切换；使用 TCPI 时无需加载其 CUDA 扩展。
-# import importlib.util
-# _ssftm_dir = Path(__file__).resolve().parents[1] / "model" / "SSFTM-main"
-# _original_sys_path = sys.path.copy()
-# try:
-#     sys.path.insert(0, str(_ssftm_dir))
-#     import torch
-#     import _C
-#     _spec = importlib.util.spec_from_file_location(
-#         "ssftm_model", _ssftm_dir / "model.py"
-#     )
-#     _ssftm = importlib.util.module_from_spec(_spec)
-#     sys.modules["ssftm_model"] = _ssftm
-#     _spec.loader.exec_module(_ssftm)
-# finally:
-#     sys.path[:] = _original_sys_path
-# GrootV = _ssftm.GrootV
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -47,6 +22,8 @@ from Mydataset.High_Dataset import MyDataset
 
 from .train_function_new import train
 from .test_function import test
+# Re-export the old class path so existing full-model checkpoints remain loadable.
+from .modelselect import SQSFormerClassifier, build_model, load_model_checkpoint
 
 
 def select_devices(gpus):
@@ -88,8 +65,10 @@ def load_datasets(args):
         expected = (config['bands'], args.windows, args.windows)
         if tuple(data.datas.shape[1:]) != expected:
             raise ValueError(f'{split} shape {tuple(data.datas.shape)}; expected [N, {expected}]')
-        if data.labels.ndim != 1 or len(data) < args.batch_size:
-            raise ValueError(f'{split} requires 1D labels and at least batch_size samples (drop_last=True)')
+        if data.labels.ndim != 1 or len(data) == 0:
+            raise ValueError(f'{split} requires nonempty 1D labels')
+        if split == 'train' and len(data) < args.batch_size:
+            raise ValueError('train requires at least batch_size samples (drop_last=True)')
         if data.labels.min() < 0 or data.labels.max() >= args.classes:
             raise ValueError(f'{split} labels must be in [0, {args.classes - 1}]')
         result.append(data)
@@ -99,7 +78,8 @@ def load_datasets(args):
 def make_loaders(args, datasets, seed):
     loaders = []
     for offset, dataset in enumerate(datasets):
-        options = dict(batch_size=args.batch_size, shuffle=True, drop_last=True,
+        is_training = offset == 0
+        options = dict(batch_size=args.batch_size, shuffle=is_training, drop_last=is_training,
                        num_workers=args.num_workers,
                        pin_memory=args.device.type == 'cuda' and not args.no_pin_memory,
                        generator=torch.Generator().manual_seed(seed + offset),
@@ -112,93 +92,14 @@ def make_loaders(args, datasets, seed):
 
 
 def get_model(args):
-    #FBCANet 网络代码
-    # model = FBCANet(in_channels=CONFIG_HSIC[args.datasets]['bands'],
-    #                num_classes=args.classes, dim=64, reduction=16,
-    #                patch_size=args.windows).to(args.device)
-    #demunet 网络代码
-    # model = MyModel(batch_size=args.batch_size, bilinear=True).to(args.device)
-# #S2Mamba 网络代码
-#     model = S2Mamba(
-#     in_chans=CONFIG_HSIC[args.datasets]['bands'],
-#     patch=args.windows,
-#     num_classes=args.classes,
-#     depths=[1],
-#     dims=[64],
-#     drop_path_rate=0.1,
-#     attn_drop_rate=0.1,
-# ).to(args.device)
-
-# s2mamba_GDN：保留 PCS/SMG，将 BSS 改为共享参数的双向 GatedDeltaNet。
-    # model = S2Mamba_GDN(
-    #     in_chans=CONFIG_HSIC[args.datasets]['bands'],
-    #     patch=args.windows,
-    #     num_classes=args.classes,
-    #     depths=[1],
-    #     dims=[64],
-    #     drop_path_rate=0.1,
-    #     attn_drop_rate=0.1,
-    #     gdn_hidden_size=128,
-    #     gdn_num_heads=4,
-    #     gdn_init='xavier',  # 'legacy' 可复现第一版初始化；修改后需重新训练。
-    #     pcs_backend='auto',
-    #     gdn_backend='auto',
-    # ).to(args.device)
-
-# CPFormer 网络代码
-    # model = CPFormer(
-    #     in_channels=CONFIG_HSIC[args.datasets]["bands"],
-    #     num_classes=args.classes,
-    #     dim=256 if args.datasets == "IP" else 64,
-    # ).to(args.device)
-
-#SSFTM 网络代码
-    # model = GrootV(
-    #     in_chans=CONFIG_HSIC[args.datasets]["bands"],
-    #     num_classes=args.classes,
-    #     channels=128,
-    #     depths=[1],
-    #     act_layer="SiLU",
-    #     norm_layer="LN",
-    #     spe_fusion="concat",
-    #     use_ssf=True,
-    #     scan_strategy="both_spacausal_spenoncausal",
-    # ).to(args.device)
-
-    # HiRWkv 网络代码
-    import importlib
-    import torch.nn as nn
-
-    if args.device.type != "cuda":
-        raise RuntimeError("当前 HiRWKV 实现依赖 CUDA，不能在 CPU 上运行")
-
-    # 文件夹名字包含连字符，用 importlib 导入。
-    # 放在函数内，避免主进程一开始就加载 CUDA 扩展。
-    module = importlib.import_module(
-        "model.Hi-RWKV-main.model.HiRWKV_model"
-    )
-    HiRWKV = module.HiRWKV
-
-    backbone = HiRWKV(
-        in_channels=CONFIG_HSIC[args.datasets]["bands"],
-        hidden_dim=128,
-        num_classes=args.classes,
-        group_num=1,
-        dataset_name=args.datasets,
-    )
-
-    # 原输出是分类分数图，平均池化后适配你的 patch 分类流程。
-    model = nn.Sequential(
-        backbone,
-        nn.AdaptiveAvgPool2d(1),
-        nn.Flatten(1),
-    ).to(args.device)
-
+    model = build_model(args)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate,
-                                momentum=args.momentum, dampening=args.weight_decay)
+                                momentum=args.momentum, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lambda epoch: 1 - epoch / args.epochs)
     return model, optimizer, scheduler
+
+
 def write_json(path, value):
     path = Path(path)
     temporary = path.with_suffix(path.suffix + '.tmp')
@@ -246,6 +147,8 @@ def run_worker(args, device, iteration_ids, run_dir):
                                   data_initialization_seconds=initialization_seconds,
                                   epoch_times=args.epoch_times,
                                   training_history=args.training_history,
+                                  best_epoch=args.best_epoch,
+                                  best_val_accuracy=args.best_val_accuracy,
                                   accuracy_unit='fraction',
                                   confusion_matrix_axes={'rows': 'true', 'columns': 'predicted'},
                                   confusion_matrix_labels=diagnostics['class_labels'],
@@ -315,7 +218,8 @@ def summarize(args, run_dir, total_seconds):
         if not np.isfinite([result['oa'], result['aa'], result['kappa']]).all():
             raise ValueError(f'Experiment {index} has non-finite metrics')
         results.append(result)
-    best = max(results, key=lambda result: result['oa'])  # first wins ties, as before
+    # Choose the representative checkpoint using validation, never test OA.
+    best = max(results, key=lambda result: result['best_val_accuracy'])
     scores = np.array([[r['oa'], r['aa'], r['kappa']] for r in results])
     classes = np.array([r['class_accuracy'] for r in results])
     # A sample standard deviation needs >=2 repeats; use null for a smoke run.
@@ -325,14 +229,15 @@ def summarize(args, run_dir, total_seconds):
     shutil.copyfile(best_path, run_dir / 'best_model.pth')
     legacy_path = Path(args.output_dir) / args.datasets / f'{args.exp_name}_ab{{{args.ablation}}}{args.datasets}.pth'
     shutil.copyfile(best_path, legacy_path)
-    summary = dict(best_iteration=best['iteration'], metrics_order=['OA', 'AA', 'Kappa'],
+    summary = dict(best_iteration=best['iteration'], selection_metric='best_val_accuracy',
+                   metrics_order=['OA', 'AA', 'Kappa'],
                    mean=scores.mean(axis=0).tolist(), sample_std=score_std,
                    class_mean=classes.mean(axis=0).tolist(), class_sample_std=class_std,
                    mean_test_seconds=float(np.mean([r['test_seconds'] for r in results])),
                    total_seconds=total_seconds, experiments=results)
     write_json(run_dir / 'summary.json', summary)
     # This file was just produced locally by this run; do not load untrusted checkpoints.
-    model = torch.load(best_path, map_location='cpu', weights_only=False)
+    model = load_model_checkpoint(best_path, args.model)
     print(parameter_count_table(model))
     print(best['report'])
     for name, mean, std in zip(summary['metrics_order'], summary['mean'], score_std or [None] * 3):

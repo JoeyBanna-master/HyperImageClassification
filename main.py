@@ -1,6 +1,7 @@
 
 import argparse
 from functions.experiments import execute, select_devices
+from functions.modelselect import DEFAULT_MODEL, get_model_names
 
 
 def experiment_name(value):
@@ -11,8 +12,10 @@ def experiment_name(value):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser("Whole_FBCANet")
+    parser = argparse.ArgumentParser("HSI patch classification")
     parser.add_argument('--exp_name', type=experiment_name, required=True, help='experiment name (required)')
+    parser.add_argument('--model', choices=get_model_names(), default=DEFAULT_MODEL,
+                        help=f'classification model (default: {DEFAULT_MODEL})')
     parser.add_argument('--ckpt_dir', type=str, default='./checkpoints/', help='checkpoints direction')
     # Training Setting
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
