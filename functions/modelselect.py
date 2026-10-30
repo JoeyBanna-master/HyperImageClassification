@@ -162,7 +162,43 @@ def _build_basemodelv1(args, dataset_config):
         num_heads=4,
     )
     
+def _build_basemodelRestoreMixer(args, dataset_config):
+    if torch.device(args.device).type != 'cuda':
+        raise RuntimeError(
+            'hsi_hybrid 的 Mamba 模块需要 CUDA；请选择可用 GPU'
+        )
 
+    # 检查 Mamba 依赖
+    importlib.import_module('mamba_ssm.modules.mamba_simple')
+
+    from model.basemodelRestoreMixer import HSIHybridBaseline
+   
+    return HSIHybridBaseline(
+        num_bands=dataset_config['bands'],
+        num_classes=dataset_config['num_classes'],
+        patch_size=args.windows,
+        dim=64,
+        num_heads=4,
+    )
+
+def _build_scab_baseline(args, dataset_config):
+    from model.basemodel.scab_baseline import CrossFusionBaseline
+
+    return CrossFusionBaseline(
+        num_bands=dataset_config['bands'],
+        num_classes=dataset_config['num_classes'],
+        dim=32,
+        num_groups=4,
+    )
+def _build_base_c(args, dataset_config):
+    from model.basemodel.base_c import CrossFusionBaseline
+
+    return CrossFusionBaseline(
+        num_bands=dataset_config['bands'],
+        num_classes=dataset_config['num_classes'],
+        dim=32,
+        num_groups=4,
+    )
 
 # 只注册用户指定的模型。结构超参数在对应 builder 中维护。
 MODEL_BUILDERS = {
@@ -175,7 +211,11 @@ MODEL_BUILDERS = {
     'sqsformer': _build_sqsformer,
     'morphformer': _build_morphformer,
     'basemodelv1':_build_basemodelv1,
+    'basemodelRestoreMixer':_build_basemodelRestoreMixer,
+    'scab_baseline': _build_scab_baseline,
+    'base_c':_build_base_c,
 }
+
 
 
 def get_model_names():

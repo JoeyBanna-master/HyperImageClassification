@@ -36,7 +36,8 @@ class ModelSelectionTests(unittest.TestCase):
 
     def test_exact_registry_and_parser_choices(self):
         expected = {'s2mamba', 'demunet', 'cpformer', 'ssftm', 'hirwkv',
-                    'hybridformer', 'sqsformer', 'morphformer'}
+                    'hybridformer', 'sqsformer', 'morphformer',
+                    'basemodelv1', 'basemodelRestoreMixer', 'scab_baseline'}
         self.assertEqual(set(get_model_names()), expected)
         parser = build_parser()
         self.assertEqual(parser.parse_args(['--exp_name', 'check']).model, 's2mamba')

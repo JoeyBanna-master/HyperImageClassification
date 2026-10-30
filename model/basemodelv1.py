@@ -18,34 +18,153 @@ except ImportError:
     Mamba = None
 
 
-class SpectralMamba(nn.Module):
-    """Read the center pixel as a sequence of C scalar band values."""
+# class SpectralMamba(nn.Module):
+#     """Read the center pixel as a sequence of C scalar band values."""
 
-    def __init__(self, num_bands: int, dim: int = 64):
+#     def __init__(self, num_bands: int, dim: int = 64):
+#         super().__init__()
+#         if Mamba is None:
+#             raise ImportError(
+#                 "Missing mamba_ssm. Install a GPU-compatible mamba-ssm "
+#                 "or activate your existing S2Mamba environment."
+#             )
+#         self.num_bands = num_bands
+#         self.embedding = nn.Linear(1, dim)
+#         self.band_pos = nn.Parameter(torch.zeros(1, num_bands, dim))
+#         nn.init.trunc_normal_(self.band_pos, std=0.02)
+#         self.pre_norm = nn.LayerNorm(dim)
+#         self.mamba = Mamba(d_model=dim, d_state=16, d_conv=4, expand=2)
+#         self.out_norm = nn.LayerNorm(dim)
+
+#     def forward(self, center_spectrum: torch.Tensor) -> torch.Tensor:
+#         # center_spectrum: [B, C]
+#         if center_spectrum.ndim != 2 or center_spectrum.size(1) != self.num_bands:
+#             raise ValueError(f"Expected [B, {self.num_bands}] center spectra")
+#         tokens = center_spectrum.unsqueeze(-1)       # [B, C, 1]
+#         tokens = self.embedding(tokens) + self.band_pos  # [B, C, D]
+#         tokens = tokens + self.mamba(self.pre_norm(tokens))
+#         return self.out_norm(tokens.mean(dim=1))      # [B, D]
+
+# 一维局部卷积 → Mamba → 波段注意力 → 光谱聚合
+class SpectralMamba(nn.Module):
+    """Local spectral convolution + stacked Mamba and band attention."""
+
+    def __init__(
+        self,
+        num_bands: int,
+        dim: int = 64,
+        num_heads: int = 4,
+        depth: int = 1,
+    ):
         super().__init__()
+
         if Mamba is None:
-            raise ImportError(
-                "Missing mamba_ssm. Install a GPU-compatible mamba-ssm "
-                "or activate your existing S2Mamba environment."
-            )
+            raise ImportError("Missing mamba_ssm")
+        if num_bands <= 0:
+            raise ValueError("num_bands must be positive")
+        if num_heads <= 0 or dim % num_heads != 0:
+            raise ValueError("dim must be divisible by positive num_heads")
+        if depth < 1:
+            raise ValueError("depth must be at least 1")
+
         self.num_bands = num_bands
+
+        # 每个波段的一个数值 → D 维特征
         self.embedding = nn.Linear(1, dim)
-        self.band_pos = nn.Parameter(torch.zeros(1, num_bands, dim))
+
+        # 标识各个波段的位置
+        self.band_pos = nn.Parameter(
+            torch.zeros(1, num_bands, dim)
+        )
         nn.init.trunc_normal_(self.band_pos, std=0.02)
-        self.pre_norm = nn.LayerNorm(dim)
-        self.mamba = Mamba(d_model=dim, d_state=16, d_conv=4, expand=2)
+
+        # 局部光谱卷积：沿波段轴卷积，保持序列长度
+        self.local_norm = nn.LayerNorm(dim)
+        self.local = nn.Sequential(
+            nn.Conv1d(
+                dim, dim,
+                kernel_size=3,
+                padding=1,
+                groups=dim,
+            ),
+            nn.GELU(),
+            nn.Conv1d(dim, dim, kernel_size=1),
+        )
+
+        # 每组都有独立参数
+        self.blocks = nn.ModuleList([
+            nn.ModuleDict({
+                "mamba_norm": nn.LayerNorm(dim),
+                "mamba": Mamba(
+                    d_model=dim,
+                    d_state=16,
+                    d_conv=4,
+                    expand=2,
+                ),
+                "attention_norm": nn.LayerNorm(dim),
+                "attention": nn.MultiheadAttention(
+                    embed_dim=dim,
+                    num_heads=num_heads,
+                    batch_first=True,
+                ),
+                "mlp_norm": nn.LayerNorm(dim),
+                "mlp": nn.Sequential(
+                    nn.Linear(dim, 2 * dim),
+                    nn.GELU(),
+                    nn.Linear(2 * dim, dim),
+                ),
+            })
+            for _ in range(depth)
+        ])
+
         self.out_norm = nn.LayerNorm(dim)
 
-    def forward(self, center_spectrum: torch.Tensor) -> torch.Tensor:
-        # center_spectrum: [B, C]
-        if center_spectrum.ndim != 2 or center_spectrum.size(1) != self.num_bands:
-            raise ValueError(f"Expected [B, {self.num_bands}] center spectra")
-        tokens = center_spectrum.unsqueeze(-1)       # [B, C, 1]
-        tokens = self.embedding(tokens) + self.band_pos  # [B, C, D]
-        tokens = tokens + self.mamba(self.pre_norm(tokens))
-        return self.out_norm(tokens.mean(dim=1))      # [B, D]
+    def forward(self, center_spectrum: torch.Tensor):
+        if (
+            center_spectrum.ndim != 2
+            or center_spectrum.size(1) != self.num_bands
+        ):
+            raise ValueError(
+                f"Expected [B, {self.num_bands}] center spectra"
+            )
 
+        # 1. 波段嵌入和位置编码
+        tokens = center_spectrum.unsqueeze(-1)      # [B, C, 1]
+        tokens = self.embedding(tokens)             # [B, C, D]
+        tokens = tokens + self.band_pos
 
+        # 2. 一维局部残差卷积
+        # Conv1d 的输入排列为 [B, 特征通道D, 序列长度C]
+        local_input = self.local_norm(tokens)
+        local_features = self.local(
+            local_input.transpose(1, 2).contiguous()
+        )                                          # [B, D, C]
+        tokens = tokens + local_features.transpose(1, 2)
+
+        # 3. 堆叠 Mamba + 波段注意力 + MLP
+        for block in self.blocks:
+            # 沿波段序列建模
+            tokens = tokens + block["mamba"](
+                block["mamba_norm"](tokens).contiguous()
+            )
+
+            # 所有波段参与自注意力；每组都保留 C 个 tokens
+            normalized = block["attention_norm"](tokens)
+            context, _ = block["attention"](
+                normalized,
+                normalized,
+                normalized,
+                need_weights=False,
+            )
+            tokens = tokens + context
+
+            tokens = tokens + block["mlp"](
+                block["mlp_norm"](tokens)
+            )
+
+        # 4. 聚合全部波段，保持原输出接口
+        feature = tokens.mean(dim=1)                # [B, D]
+        return self.out_norm(feature)
 class SpatialTransformer(nn.Module):
     """Center-query attention over every pixel in a P x P HSI patch."""
 
@@ -120,10 +239,7 @@ class HSIHybridBaseline(nn.Module):
         self.num_bands = num_bands
         self.patch_size = patch_size
         self.spectral = SpectralMamba(num_bands=num_bands, dim=dim)
-        self.spatial = SpatialTransformer(
-            num_bands=num_bands, patch_size=patch_size,
-            dim=dim, num_heads=num_heads
-        )
+        self.spatial = SpatialTransformer(num_bands=num_bands, patch_size=patch_size, dim=dim, num_heads=num_heads)
         self.fusion = GatedFusion(dim=dim)
         self.classifier = nn.Linear(dim, num_classes)
 

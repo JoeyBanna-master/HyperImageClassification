@@ -1,8 +1,15 @@
  
+ Houston2013
+
+ python main.py --model basemodelRestoreMixer --exp_name basemodelRestoreMixer --gpus 0,1,2
+  python main.py --model scab_baseline --exp_name scab_baseline --gpus 0,1,2
+
  PU
  python main.py --exp_name CPF_pu --gpus 0,1,2 --datasets PU --classes 9
 
  python main.py --exp_name CPF_pu --model demunet --gpus 0,1,2 --datasets PU --classes 9
+
+
 
 
 
