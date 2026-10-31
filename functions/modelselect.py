@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import sys
 
+# from HSI.model.basemodel.base_c import CrossFusionBaseline
 import torch
 from torch import nn
 
@@ -182,12 +183,13 @@ def _build_basemodelRestoreMixer(args, dataset_config):
     )
 
 def _build_scab_baseline(args, dataset_config):
+    # from model.basemodel.scab_baseline import CrossAttentionBaseline
     from model.basemodel.scab_baseline import CrossFusionBaseline
-
+   
     return CrossFusionBaseline(
         num_bands=dataset_config['bands'],
         num_classes=dataset_config['num_classes'],
-        dim=32,
+        dim=128,
         num_groups=4,
     )
 def _build_base_c(args, dataset_config):

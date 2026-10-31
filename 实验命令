@@ -8,13 +8,13 @@
  python main.py --exp_name CPF_pu --gpus 0,1,2 --datasets PU --classes 9
 
  python main.py --exp_name CPF_pu --model demunet --gpus 0,1,2 --datasets PU --classes 9
+ python main.py --exp_name scab_baseline --model scab_baseline  --gpus 0,1,2 --datasets PU --classes 9
 
 
 
 
 
-
-  's2mamba': _build_s2mamba,
+'s2mamba': _build_s2mamba,
     'demunet': _build_demunet,
     'cpformer': _build_cpformer,
     'ssftm': _build_ssftm,
@@ -22,6 +22,10 @@
     'hybridformer': _build_hybridformer,
     'sqsformer': _build_sqsformer,
     'morphformer': _build_morphformer,
+    'basemodelv1':_build_basemodelv1,
+    'basemodelRestoreMixer':_build_basemodelRestoreMixer,
+    'scab_baseline': _build_scab_baseline,
+    'base_c':_build_base_c,
 
   python main.py --exp_name Hi-RWKV_pu --gpus 0,1,2 --datasets PU --classes 9
 
@@ -42,6 +46,7 @@ python main.py --exp_name hybridformer --model hybridformer --gpus 0 --datasets 
 
 python main.py --exp_name sqsformer --model sqsformer --gpus 0 --datasets LongKou --classes 9
 python main.py --exp_name morphformer --model morphformer --gpus 0 --datasets LongKou --classes 9
+python main.py --exp_name scab_baseline --model scab_baseline --gpus 0 --datasets LongKou --classes 9
 
 
 
