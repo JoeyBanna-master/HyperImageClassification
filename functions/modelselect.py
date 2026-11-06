@@ -163,43 +163,43 @@ def _build_basemodelv1(args, dataset_config):
         num_heads=4,
     )
     
-def _build_basemodelRestoreMixer(args, dataset_config):
-    if torch.device(args.device).type != 'cuda':
-        raise RuntimeError(
-            'hsi_hybrid 的 Mamba 模块需要 CUDA；请选择可用 GPU'
-        )
 
-    # 检查 Mamba 依赖
-    importlib.import_module('mamba_ssm.modules.mamba_simple')
 
-    from model.basemodelRestoreMixer import HSIHybridBaseline
-   
-    return HSIHybridBaseline(
-        num_bands=dataset_config['bands'],
-        num_classes=dataset_config['num_classes'],
-        patch_size=args.windows,
-        dim=64,
+from functools import partial
+
+def _build_multiscale_scab(args, dataset_config):
+    from model.basemodel.baseline import MultiScaleSCABBaseline
+    from model.basemodel.scab_featurefusion import (
+        PairwiseCrossFusion,
+        SpatialAttention,
+        SoftmaxAttention2D,
+        BiASpatialAttention2D,
+    )
+    spatial_attention_factory = partial(
+        BiASpatialAttention2D,
+        input_resolution=(args.windows, args.windows),
         num_heads=4,
+        attention_groups=2,
+        stride=2,
+        dynamic_factor=2,
+        postype="rel",
+        attn_drop=0.0,
+        proj_drop=0.0,
+    )
+    attention_factory = SpatialAttention  # 脉冲注意力
+    fusion_factory = partial(
+        PairwiseCrossFusion,
+    spectral_attention_factory=attention_factory,
+    spatial_attention_factory=spatial_attention_factory,
     )
 
-def _build_scab_baseline(args, dataset_config):
-    # from model.basemodel.scab_baseline import CrossAttentionBaseline
-    from model.basemodel.scab_baseline import CrossFusionBaseline
-   
-    return CrossFusionBaseline(
-        num_bands=dataset_config['bands'],
-        num_classes=dataset_config['num_classes'],
-        dim=128,
-        num_groups=4,
-    )
-def _build_base_c(args, dataset_config):
-    from model.basemodel.base_c import CrossFusionBaseline
-
-    return CrossFusionBaseline(
-        num_bands=dataset_config['bands'],
-        num_classes=dataset_config['num_classes'],
-        dim=32,
-        num_groups=4,
+    return MultiScaleSCABBaseline(
+        num_bands=dataset_config["bands"],
+        num_classes=dataset_config["num_classes"],
+        embed_dim=16,
+        dim=64,
+        initial_dilation=2,
+        fusion_factory=fusion_factory,
     )
 
 # 只注册用户指定的模型。结构超参数在对应 builder 中维护。
@@ -213,9 +213,8 @@ MODEL_BUILDERS = {
     'sqsformer': _build_sqsformer,
     'morphformer': _build_morphformer,
     'basemodelv1':_build_basemodelv1,
-    'basemodelRestoreMixer':_build_basemodelRestoreMixer,
-    'scab_baseline': _build_scab_baseline,
-    'base_c':_build_base_c,
+    'multiscale_scab': _build_multiscale_scab,
+    
 }
 
 
