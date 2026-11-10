@@ -190,7 +190,7 @@ def _build_multiscale_scab(args, dataset_config):
     fusion_factory = partial(
         PairwiseCrossFusion,
     spectral_attention_factory=attention_factory,
-    spatial_attention_factory=spatial_attention_factory,
+    spatial_attention_factory=attention_factory
     )
 
     return MultiScaleSCABBaseline(

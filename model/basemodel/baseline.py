@@ -3,7 +3,9 @@ import torch.nn as nn
 
 from model.basemodel.AdaptiveConv import MultiScaleFeatureExtractorWithAdaDR
 from model.basemodel.scab_featurefusion import PairwiseCrossFusion
-
+from model.basemodel.featureselect import (
+    RegionAwareMixtureExperts
+)
 
 class MultiScaleSCABBaseline(nn.Module):
     def __init__(
@@ -52,6 +54,11 @@ class MultiScaleSCABBaseline(nn.Module):
             nn.BatchNorm2d(dim),
             nn.ReLU(),
         )
+        # Feature Selection
+        self.feature_select = RegionAwareMixtureExperts(
+            dim=dim,
+            center_size=3
+        )
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Linear(dim, num_classes)
 
@@ -78,4 +85,6 @@ class MultiScaleSCABBaseline(nn.Module):
     def forward(self, x):
         features = self.forward_features(x)
         fused = self.merge(torch.cat(features, dim=1))
+           # 3. 特征筛选
+        fused = self.feature_select(fused)
         return self.head(self.pool(fused).flatten(1))

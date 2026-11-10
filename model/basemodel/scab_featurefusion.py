@@ -26,10 +26,10 @@ class SpikingSpatialAttention(nn.Module):
             tau=2.0, detach_reset=True, backend="torch"
         )
         self.k_lif = MultiStepLIFNode(
-            tau=2.0, detach_reset=True, backend="torch",v_threshold=0.75
+            tau=2.0, detach_reset=True, backend="torch",v_threshold=1.0
         )
         self.v_lif = MultiStepLIFNode(
-            tau=2.0, detach_reset=True, backend="torch",v_threshold=0.75
+            tau=2.0, detach_reset=True, backend="torch",v_threshold=1.0
         )
         self.gate_lif = MultiStepLIFNode(
             tau=2.0, v_threshold=0.5,
