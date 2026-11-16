@@ -84,7 +84,7 @@ class RegionAwareMixtureExperts(nn.Module):
         self,
         dim=128,
         center_size=3,
-        temperature=1.0
+        temperature=1.0, patch_size=11
     ):
         super().__init__()
 
@@ -107,20 +107,22 @@ class RegionAwareMixtureExperts(nn.Module):
         # ==========================================
         # 专门处理中心区域
 
-        self.center_expert = FeatureExpert(
-            dim=dim,
-            spatial=True
+        center_side = min(center_size, patch_size)
+        self.center_expert = ProjectedExpert2d(dim, n_tokens=center_side ** 2)
+
+        first_half = (patch_size + 1) // 2
+        second_half = patch_size - first_half
+
+        region_tokens = (
+            first_half * first_half,    # 左上
+            first_half * second_half,   # 右上
+            second_half * first_half,    # 左下
+            second_half * second_half,   # 右下
         )
-
-        # ==========================================
-        # 3. Regional Experts
-        # ==========================================
-        # 四个区域对应四个独立专家
-
-        self.region_experts = nn.ModuleList([
-            FeatureExpert(dim, spatial=True)
-            for _ in range(4)
-        ])
+        self.region_experts = nn.ModuleList(
+            ProjectedExpert2d(dim, n_tokens=n_tokens)
+            for n_tokens in region_tokens
+        )
 
         # ==========================================
         # 4. Region Router
@@ -412,7 +414,24 @@ class RegionAwareMixtureExperts(nn.Module):
         out = x + self.gamma * refinement
 
         return out
+class ProjectedExpert2d(nn.Module):
+    def __init__(self, dim, n_tokens):
+        super().__init__()
+        proj_dim = max(1, dim // 10)
+        flat_dim = n_tokens * proj_dim
+        hidden_dim = max(1, flat_dim // 10)
+        self.down = nn.Linear(dim, proj_dim)
+        self.mix = nn.Sequential(
+            nn.Linear(flat_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, flat_dim),
+        )
+        self.up = nn.Linear(proj_dim, dim)
 
+    def forward(self, x):
+        tokens = self.down(x.flatten(2).transpose(1, 2))
+        mixed = self.mix(tokens.flatten(1)).reshape_as(tokens)
+        return self.up(mixed).transpose(1, 2).reshape_as(x)
 
 if __name__ == "__main__":
 

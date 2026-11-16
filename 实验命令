@@ -3,13 +3,13 @@
 
  python main.py --model basemodelRestoreMixer --exp_name basemodelRestoreMixer --gpus 0,1,2
   python main.py --model scab_baseline --exp_name scab_baseline --gpus 0,1,2
-  python main.py --model multiscale_scab --exp_name baseline_4feature --gpus 0,1,2
+  python main.py --model multiscale_scab --exp_name baseline_softmax_gate --gpus 0,1,2
 
  PU
  python main.py --exp_name CPF_pu --gpus 0,1,2 --datasets PU --classes 9
 
  python main.py --exp_name CPF_pu --model demunet --gpus 0,1,2 --datasets PU --classes 9
- python main.py --exp_name scab_baseline --model scab_baseline  --gpus 0,1,2 --datasets PU --classes 9
+ python main.py --exp_name baseline_softmax_gate --model multiscale_scab  --gpus 0,1,2 --datasets PU --classes 9
 
 
 
@@ -48,6 +48,7 @@ python main.py --exp_name hybridformer --model hybridformer --gpus 0 --datasets 
 python main.py --exp_name sqsformer --model sqsformer --gpus 0 --datasets LongKou --classes 9
 python main.py --exp_name morphformer --model morphformer --gpus 0 --datasets LongKou --classes 9
 python main.py --exp_name scab_baseline --model scab_baseline --gpus 0 --datasets LongKou --classes 9
+python main.py --model multiscale_scab --exp_name baseline_softmax_gate --gpus 0 --datasets LongKou --classes 9 
 
 
 
@@ -66,6 +67,7 @@ python main.py --exp_name hybridformer --model hybridformer --gpus 0 --datasets 
 
 python main.py --exp_name sqsformer --model sqsformer --gpus 0 --datasets XU --classes 9 --windows 9
 
+python main.py --model multiscale_scab --exp_name baseline_softmax_gate --gpus 0 --datasets XU --classes 9 --windows 9
 
 
 conda activate ssftm_env

@@ -146,6 +146,7 @@ class MultiScaleFeatureExtractorWithAdaDR(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.spatial_medium = nn.Sequential(
+            # nn.Conv3d(1, embed_dim, kernel_size=(1, 5, 5), padding=(0, 2, 2)),
             HSIAdaptiveSpatialConv(embed_dim, initial_dilation),
             nn.BatchNorm3d(embed_dim),
             nn.ReLU(inplace=True),
@@ -175,5 +176,5 @@ if __name__ == '__main__':
     fs, fp1, fp2, fp3 = extractor(example)
     print('spectral :', fs.shape)
     print('small    :', fp1.shape)
-    print('AdaDR    :', fp2.shape)
+    print('medium   :', fp2.shape)
     print('large    :', fp3.shape)

@@ -17,6 +17,7 @@ class MultiScaleSCABBaseline(nn.Module):
         initial_dilation=2,
         extractor=None,
         fusion_factory=PairwiseCrossFusion,
+        patch_size=11,
     ):
         super().__init__()
         self.num_bands = num_bands
@@ -56,9 +57,10 @@ class MultiScaleSCABBaseline(nn.Module):
         )
         # Feature Selection
         self.feature_select = RegionAwareMixtureExperts(
-            dim=dim,
-            center_size=3
-        )
+    dim=dim,
+    center_size=3,
+    patch_size=patch_size,
+)
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Linear(dim, num_classes)
 

@@ -189,8 +189,8 @@ def _build_multiscale_scab(args, dataset_config):
     attention_factory = SpatialAttention  # 脉冲注意力
     fusion_factory = partial(
         PairwiseCrossFusion,
-    spectral_attention_factory=attention_factory,
-    spatial_attention_factory=attention_factory
+    spectral_attention_factory=SoftmaxAttention2D,
+    spatial_attention_factory=SoftmaxAttention2D
     )
 
     return MultiScaleSCABBaseline(
@@ -200,6 +200,7 @@ def _build_multiscale_scab(args, dataset_config):
         dim=64,
         initial_dilation=2,
         fusion_factory=fusion_factory,
+        patch_size=args.windows
     )
 
 # 只注册用户指定的模型。结构超参数在对应 builder 中维护。

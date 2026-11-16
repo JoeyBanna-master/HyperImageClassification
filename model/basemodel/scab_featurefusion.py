@@ -26,10 +26,10 @@ class SpikingSpatialAttention(nn.Module):
             tau=2.0, detach_reset=True, backend="torch"
         )
         self.k_lif = MultiStepLIFNode(
-            tau=2.0, detach_reset=True, backend="torch",v_threshold=1.0
+            tau=2.0, detach_reset=True, backend="torch",v_threshold=0.75
         )
         self.v_lif = MultiStepLIFNode(
-            tau=2.0, detach_reset=True, backend="torch",v_threshold=1.0
+            tau=2.0, detach_reset=True, backend="torch",v_threshold=0.75
         )
         self.gate_lif = MultiStepLIFNode(
             tau=2.0, v_threshold=0.5,
@@ -84,8 +84,48 @@ class SpatialAttention(nn.Module):
         tokens = tokens + update             # 保留短残差
 
         return tokens.transpose(1, 2).reshape(B, C, H, W)
+# class PairwiseCrossFusion(nn.Module):
+#     """两路 [B,dim,H,W] → 一路 [B,dim,H,W]。"""
+
+#     def __init__(
+#         self,
+#         dim=128,
+#         spectral_attention_factory=SpatialAttention,
+#         spatial_attention_factory=SpatialAttention,
+#     ):
+#         super().__init__()
+#         self.dim = dim
+
+#         # 工厂每次创建新实例，避免不同分支意外共享参数。
+#         self.spectral_attention = spectral_attention_factory(dim)
+#         self.spatial_attention = spatial_attention_factory(dim)
+
+#         self.cross_spectral = nn.Conv2d(2 * dim, dim, 1)
+#         self.cross_spatial = nn.Conv2d(2 * dim, dim, 1)
+
+#         self.fusion = nn.Sequential(
+#             nn.Conv2d(2 * dim, dim, 1, bias=False),
+#             nn.BatchNorm2d(dim),
+#             nn.ReLU(),
+#         )
+
+#     def forward(self, fs, fp):
+#         if fs.ndim != 4 or fs.shape[1] != self.dim or fp.shape != fs.shape:
+#             raise ValueError("Expected two matching [B,dim,H,W] tensors")
+
+#         fs_attn = self.spectral_attention(fs)
+#         fp_attn = self.spatial_attention(fp)
+
+#         rs = fs + self.cross_spectral(
+#             torch.cat([fs_attn, fp], dim=1)
+#         )
+#         rp = fp + self.cross_spatial(
+#             torch.cat([fp_attn, fs], dim=1)
+#         )
+
+#         return self.fusion(torch.cat([rs, rp], dim=1))
 class PairwiseCrossFusion(nn.Module):
-    """两路 [B,dim,H,W] → 一路 [B,dim,H,W]。"""
+    """用双向门控融合两张 [B, dim, H, W] 特征图。"""
 
     def __init__(
         self,
@@ -96,35 +136,47 @@ class PairwiseCrossFusion(nn.Module):
         super().__init__()
         self.dim = dim
 
-        # 工厂每次创建新实例，避免不同分支意外共享参数。
         self.spectral_attention = spectral_attention_factory(dim)
         self.spatial_attention = spatial_attention_factory(dim)
 
-        self.cross_spectral = nn.Conv2d(2 * dim, dim, 1)
-        self.cross_spatial = nn.Conv2d(2 * dim, dim, 1)
+        # 根据本路的注意力特征与对侧的原始特征计算更新量。
+        self.cross_spectral = nn.Conv2d(2 * dim, dim, kernel_size=1)
+        self.cross_spatial = nn.Conv2d(2 * dim, dim, kernel_size=1)
+
+        # 用对侧的注意力特征生成门控，控制更新量。
+        self.gate_from_spatial = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=1),
+            nn.Sigmoid(),
+        )
+        self.gate_from_spectral = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=1),
+            nn.Sigmoid(),
+        )
 
         self.fusion = nn.Sequential(
-            nn.Conv2d(2 * dim, dim, 1, bias=False),
+            nn.Conv2d(2 * dim, dim, kernel_size=1, bias=False),
             nn.BatchNorm2d(dim),
             nn.ReLU(),
         )
 
     def forward(self, fs, fp):
         if fs.ndim != 4 or fs.shape[1] != self.dim or fp.shape != fs.shape:
-            raise ValueError("Expected two matching [B,dim,H,W] tensors")
+            raise ValueError(
+                f"Expected two matching [B, {self.dim}, H, W] tensors, "
+                f"got {tuple(fs.shape)} and {tuple(fp.shape)}"
+            )
 
         fs_attn = self.spectral_attention(fs)
         fp_attn = self.spatial_attention(fp)
 
-        rs = fs + self.cross_spectral(
-            torch.cat([fs_attn, fp], dim=1)
-        )
-        rp = fp + self.cross_spatial(
-            torch.cat([fp_attn, fs], dim=1)
-        )
+        delta_s = self.cross_spectral(torch.cat([fs_attn, fp], dim=1))
+        delta_p = self.cross_spatial(torch.cat([fp_attn, fs], dim=1))
+
+        # 光谱路加回原始光谱，空间路加回原始空间。
+        rs = fs + self.gate_from_spatial(fp_attn) * delta_s
+        rp = fp + self.gate_from_spectral(fs_attn) * delta_p
 
         return self.fusion(torch.cat([rs, rp], dim=1))
-
 class SoftmaxAttention2D(nn.Module):
     """普通注意力示例"""
 
