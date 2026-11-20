@@ -173,24 +173,21 @@ def _build_multiscale_scab(args, dataset_config):
         PairwiseCrossFusion,
         SpatialAttention,
         SoftmaxAttention2D,
-        BiASpatialAttention2D,
+        MHLA2D,
     )
-    spatial_attention_factory = partial(
-        BiASpatialAttention2D,
-        input_resolution=(args.windows, args.windows),
+   
+
+    attention_factory = partial(
+        MHLA2D,
         num_heads=4,
-        attention_groups=2,
-        stride=2,
-        dynamic_factor=2,
-        postype="rel",
-        attn_drop=0.0,
-        proj_drop=0.0,
+        input_resolution=(args.windows, args.windows),
+        piece_size=4,
+        dropout=0.0,
     )
-    attention_factory = SpatialAttention  # 脉冲注意力
     fusion_factory = partial(
-        PairwiseCrossFusion,
-    spectral_attention_factory=SoftmaxAttention2D,
-    spatial_attention_factory=SoftmaxAttention2D
+    PairwiseCrossFusion,
+    spectral_attention_factory=attention_factory,
+    spatial_attention_factory=attention_factory
     )
 
     return MultiScaleSCABBaseline(

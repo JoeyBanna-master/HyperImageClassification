@@ -84,48 +84,8 @@ class SpatialAttention(nn.Module):
         tokens = tokens + update             # 保留短残差
 
         return tokens.transpose(1, 2).reshape(B, C, H, W)
-# class PairwiseCrossFusion(nn.Module):
-#     """两路 [B,dim,H,W] → 一路 [B,dim,H,W]。"""
-
-#     def __init__(
-#         self,
-#         dim=128,
-#         spectral_attention_factory=SpatialAttention,
-#         spatial_attention_factory=SpatialAttention,
-#     ):
-#         super().__init__()
-#         self.dim = dim
-
-#         # 工厂每次创建新实例，避免不同分支意外共享参数。
-#         self.spectral_attention = spectral_attention_factory(dim)
-#         self.spatial_attention = spatial_attention_factory(dim)
-
-#         self.cross_spectral = nn.Conv2d(2 * dim, dim, 1)
-#         self.cross_spatial = nn.Conv2d(2 * dim, dim, 1)
-
-#         self.fusion = nn.Sequential(
-#             nn.Conv2d(2 * dim, dim, 1, bias=False),
-#             nn.BatchNorm2d(dim),
-#             nn.ReLU(),
-#         )
-
-#     def forward(self, fs, fp):
-#         if fs.ndim != 4 or fs.shape[1] != self.dim or fp.shape != fs.shape:
-#             raise ValueError("Expected two matching [B,dim,H,W] tensors")
-
-#         fs_attn = self.spectral_attention(fs)
-#         fp_attn = self.spatial_attention(fp)
-
-#         rs = fs + self.cross_spectral(
-#             torch.cat([fs_attn, fp], dim=1)
-#         )
-#         rp = fp + self.cross_spatial(
-#             torch.cat([fp_attn, fs], dim=1)
-#         )
-
-#         return self.fusion(torch.cat([rs, rp], dim=1))
 class PairwiseCrossFusion(nn.Module):
-    """用双向门控融合两张 [B, dim, H, W] 特征图。"""
+    """两路 [B,dim,H,W] → 一路 [B,dim,H,W]。"""
 
     def __init__(
         self,
@@ -136,47 +96,87 @@ class PairwiseCrossFusion(nn.Module):
         super().__init__()
         self.dim = dim
 
+        # 工厂每次创建新实例，避免不同分支意外共享参数。
         self.spectral_attention = spectral_attention_factory(dim)
         self.spatial_attention = spatial_attention_factory(dim)
 
-        # 根据本路的注意力特征与对侧的原始特征计算更新量。
-        self.cross_spectral = nn.Conv2d(2 * dim, dim, kernel_size=1)
-        self.cross_spatial = nn.Conv2d(2 * dim, dim, kernel_size=1)
-
-        # 用对侧的注意力特征生成门控，控制更新量。
-        self.gate_from_spatial = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1),
-            nn.Sigmoid(),
-        )
-        self.gate_from_spectral = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1),
-            nn.Sigmoid(),
-        )
+        self.cross_spectral = nn.Conv2d(2 * dim, dim, 1)
+        self.cross_spatial = nn.Conv2d(2 * dim, dim, 1)
 
         self.fusion = nn.Sequential(
-            nn.Conv2d(2 * dim, dim, kernel_size=1, bias=False),
+            nn.Conv2d(2 * dim, dim, 1, bias=False),
             nn.BatchNorm2d(dim),
             nn.ReLU(),
         )
 
     def forward(self, fs, fp):
         if fs.ndim != 4 or fs.shape[1] != self.dim or fp.shape != fs.shape:
-            raise ValueError(
-                f"Expected two matching [B, {self.dim}, H, W] tensors, "
-                f"got {tuple(fs.shape)} and {tuple(fp.shape)}"
-            )
+            raise ValueError("Expected two matching [B,dim,H,W] tensors")
 
         fs_attn = self.spectral_attention(fs)
         fp_attn = self.spatial_attention(fp)
 
-        delta_s = self.cross_spectral(torch.cat([fs_attn, fp], dim=1))
-        delta_p = self.cross_spatial(torch.cat([fp_attn, fs], dim=1))
-
-        # 光谱路加回原始光谱，空间路加回原始空间。
-        rs = fs + self.gate_from_spatial(fp_attn) * delta_s
-        rp = fp + self.gate_from_spectral(fs_attn) * delta_p
+        rs = fs + self.cross_spectral(
+            torch.cat([fs_attn, fp], dim=1)
+        )
+        rp = fp + self.cross_spatial(
+            torch.cat([fp_attn, fs], dim=1)
+        )
 
         return self.fusion(torch.cat([rs, rp], dim=1))
+# class PairwiseCrossFusion(nn.Module):
+#     """用双向门控融合两张 [B, dim, H, W] 特征图。"""
+
+#     def __init__(
+#         self,
+#         dim=128,
+#         spectral_attention_factory=SpatialAttention,
+#         spatial_attention_factory=SpatialAttention,
+#     ):
+#         super().__init__()
+#         self.dim = dim
+
+#         self.spectral_attention = spectral_attention_factory(dim)
+#         self.spatial_attention = spatial_attention_factory(dim)
+
+#         # 根据本路的注意力特征与对侧的原始特征计算更新量。
+#         self.cross_spectral = nn.Conv2d(2 * dim, dim, kernel_size=1)
+#         self.cross_spatial = nn.Conv2d(2 * dim, dim, kernel_size=1)
+
+#         # 用对侧的注意力特征生成门控，控制更新量。
+#         self.gate_from_spatial = nn.Sequential(
+#             nn.Conv2d(dim, dim, kernel_size=1),
+#             nn.Sigmoid(),
+#         )
+#         self.gate_from_spectral = nn.Sequential(
+#             nn.Conv2d(dim, dim, kernel_size=1),
+#             nn.Sigmoid(),
+#         )
+
+#         self.fusion = nn.Sequential(
+#             nn.Conv2d(2 * dim, dim, kernel_size=1, bias=False),
+#             nn.BatchNorm2d(dim),
+#             nn.ReLU(),
+#         )
+
+#     def forward(self, fs, fp):
+#         if fs.ndim != 4 or fs.shape[1] != self.dim or fp.shape != fs.shape:
+#             raise ValueError(
+#                 f"Expected two matching [B, {self.dim}, H, W] tensors, "
+#                 f"got {tuple(fs.shape)} and {tuple(fp.shape)}"
+#             )
+
+#         fs_attn = self.spectral_attention(fs)
+#         fp_attn = self.spatial_attention(fp)
+
+#         delta_s = self.cross_spectral(torch.cat([fs_attn, fp], dim=1))
+#         delta_p = self.cross_spatial(torch.cat([fp_attn, fs], dim=1))
+
+#         # 光谱路加回原始光谱，空间路加回原始空间。
+#         rs = fs + self.gate_from_spatial(fp_attn) * delta_s
+#         rp = fp + self.gate_from_spectral(fs_attn) * delta_p
+
+#         return self.fusion(torch.cat([rs, rp], dim=1))
 class SoftmaxAttention2D(nn.Module):
     """普通注意力示例"""
 
@@ -196,75 +196,104 @@ class SoftmaxAttention2D(nn.Module):
             tokens, tokens, tokens, need_weights=False
         )
         return (tokens + update).transpose(1, 2).reshape(b, c, h, w)
-class BiASpatialAttention2D(nn.Module):
-    """
-    空间注意力适配器，包含短残差。
+class MHLA2D(nn.Module):
+    """Map [B, dim, H, W] to the same shape, including one residual.
 
-    输入、输出：[B, dim, H, W]
-    使用时固定 input_resolution，与实际特征尺寸一致。
+    For input_resolution=(11, 11) and piece_size=4, nine spatial blocks
+    contain sixteen tokens each after padding. Padding is applied after
+    Q/K activation and V projection, so padded keys and values stay zero.
     """
 
     def __init__(
         self,
         dim,
-        input_resolution=(11, 11),
         num_heads=4,
-        attention_groups=2,
-        stride=2,
-        dynamic_factor=2,
-        postype="rel",
-        attn_drop=0.0,
-        proj_drop=0.0,
+        input_resolution=(11, 11),
+        piece_size=4,
+        dropout=0.0,
     ):
         super().__init__()
-
-        # 仅在使用 BiA 时加载原模块。
-        from model.CBiAFormer.models.CBiAFormer import BiA_Attention
-
-        h, w = input_resolution
-
-        if h != w or h < 2:
-            raise ValueError("当前适配器要求尺寸不小于 2 的方形特征图")
-
-        if num_heads <= 0 or attention_groups <= 0:
-            raise ValueError("num_heads 和 attention_groups 必须大于 0")
-
-        # 原 BiA 局部分支使用 dim/4 通道，再进行多头划分。
-        if dim <= 0 or dim % (4 * num_heads) != 0:
-            raise ValueError("dim 必须是 4 * num_heads 的正整数倍")
-
-        if num_heads % attention_groups != 0:
-            raise ValueError("num_heads 必须能被 attention_groups 整除")
-
-        if stride < 1 or postype not in ("rel", "conv"):
-            raise ValueError("stride 必须为正，postype 必须是 rel 或 conv")
+        if dim <= 0 or num_heads <= 0 or dim % num_heads:
+            raise ValueError("dim must be positive and divisible by num_heads")
+        height, width = input_resolution
+        if min(height, width, piece_size) < 1:
+            raise ValueError("input dimensions and piece_size must be positive")
 
         self.dim = dim
-        self.input_resolution = (h, w)
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.input_resolution = (height, width)
+        self.piece_size = piece_size
+        self.block_rows = (height + piece_size - 1) // piece_size
+        self.block_cols = (width + piece_size - 1) // piece_size
+        self.num_blocks = self.block_rows * self.block_cols
+        self.pad_height = self.block_rows * piece_size - height
+        self.pad_width = self.block_cols * piece_size - width
+        self.eps = 1e-6
 
-        self.attn = BiA_Attention(
-            dim=dim,
-            input_resolution=(h, w),
-            num_heads=num_heads,
-            stride=stride,
-            dynamic_factor=dynamic_factor,
-            # 整个 H×W patch 作为一个查询窗口。
-            window_size=h,
-            Attention_Group=attention_groups,
-            postype=postype,
-            # 启用局部细粒度分支，每个位置采样 9 个邻域点。
-            k=3,
-            attn_drop=attn_drop,
-            proj_drop=proj_drop,
+        self.norm = nn.LayerNorm(dim)
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.q_norm = nn.RMSNorm(dim)
+        self.k_norm = nn.RMSNorm(dim)
+        self.lepe = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(dropout)
+
+        rows, cols = torch.meshgrid(
+            torch.arange(self.block_rows, dtype=torch.float32),
+            torch.arange(self.block_cols, dtype=torch.float32),
+            indexing="ij",
+        )
+        centers = torch.stack((rows, cols), dim=-1).reshape(-1, 2)
+        distances = torch.cdist(centers, centers)
+        initial_weights = 1 - distances / distances.max().clamp_min(1)
+        initial_weights = initial_weights.clamp_min(1e-4)
+        initial_weights = initial_weights / initial_weights.sum(dim=-1, keepdim=True)
+        self.mix_logits = nn.Parameter(initial_weights.log())
+
+    def _split_heads(self, features):
+        """Convert valid [B,H,W,C] features to [B,heads,blocks,tokens,d]."""
+        batch_size = features.shape[0]
+        features = F.pad(
+            features, (0, 0, 0, self.pad_width, 0, self.pad_height)
+        )
+        blocks = features.reshape(
+            batch_size,
+            self.block_rows,
+            self.piece_size,
+            self.block_cols,
+            self.piece_size,
+            self.num_heads,
+            self.head_dim,
+        )
+        return blocks.permute(0, 5, 1, 3, 2, 4, 6).reshape(
+            batch_size,
+            self.num_heads,
+            self.num_blocks,
+            self.piece_size ** 2,
+            self.head_dim,
         )
 
-        # 原实现的固定步幅卷积在 11×11 下输出 2×2 偏移图，
-        # 但当前查询窗口网格是 1×1，需要将两者对齐。
-        # 这里只池化偏移预测图，输入特征保持原尺寸。
-        self.attn.offset.add_module(
-            "window_pool",
-            nn.AdaptiveAvgPool2d(self.attn.window_num),
+    def _restore(self, blocks):
+        """Restore valid [B,H,W,C] features from the block/head layout."""
+        batch_size = blocks.shape[0]
+        features = blocks.reshape(
+            batch_size,
+            self.num_heads,
+            self.block_rows,
+            self.block_cols,
+            self.piece_size,
+            self.piece_size,
+            self.head_dim,
         )
+        features = features.permute(0, 2, 4, 3, 5, 1, 6).reshape(
+            batch_size,
+            self.block_rows * self.piece_size,
+            self.block_cols * self.piece_size,
+            self.dim,
+        )
+        height, width = self.input_resolution
+        return features[:, :height, :width, :]
 
     def forward(self, x):
         if (
@@ -273,14 +302,35 @@ class BiASpatialAttention2D(nn.Module):
             or tuple(x.shape[-2:]) != self.input_resolution
         ):
             raise ValueError(
-                f"Expected [B,{self.dim},"
-                f"{self.input_resolution[0]},"
-                f"{self.input_resolution[1]}], "
-                f"got {tuple(x.shape)}"
+                f"Expected [B,{self.dim},{self.input_resolution[0]},"
+                f"{self.input_resolution[1]}], got {tuple(x.shape)}"
             )
 
-        # 原 BiA 返回更新特征与采样坐标。
-        update, _ = self.attn(x)
+        tokens = self.norm(x.permute(0, 2, 3, 1))
+        q, k, v = self.qkv(tokens).chunk(3, dim=-1)
+        q = F.relu(self.q_norm(q)) + self.eps
+        k = F.relu(self.k_norm(k)) + self.eps
 
-        # 与现有 SpatialAttention 保持一致：返回含短残差的特征。
+        # Compute LePE on valid V. The convolution uses zero boundary padding.
+        local_position = self.lepe(v.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        q, k, v = (self._split_heads(features) for features in (q, k, v))
+        output_dtype = v.dtype
+        accumulation_dtype = torch.float32 if v.dtype in (
+            torch.float16, torch.bfloat16
+        ) else v.dtype
+
+        # Keep reductions and normalization in float32 under mixed precision.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            q, k, v = (features.to(accumulation_dtype) for features in (q, k, v))
+            mixing = self.mix_logits.to(accumulation_dtype).softmax(dim=-1)
+            kv = k.transpose(-2, -1) @ v
+            k_sum = k.sum(dim=-2).unsqueeze(-1)
+            mixed_kv = torch.einsum("ij,bhjde->bhide", mixing, kv)
+            mixed_k_sum = torch.einsum("ij,bhjdv->bhidv", mixing, k_sum)
+            numerator = q @ mixed_kv
+            denominator = (q @ mixed_k_sum).clamp_min(self.eps)
+            update = numerator / denominator
+
+        update = self._restore(update.to(output_dtype)) + local_position
+        update = self.proj_drop(self.proj(update)).permute(0, 3, 1, 2)
         return x + update
